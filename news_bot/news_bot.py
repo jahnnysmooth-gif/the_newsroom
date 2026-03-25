@@ -40,8 +40,8 @@ def cfg(name: str, default: Any = None) -> Any:
     return os.getenv(name, default)
 
 
-DISCORD_TOKEN = str(cfg("DISCORD_TOKEN", "") or "").strip()
-DISCORD_CHANNEL_ID = int(str(cfg("DISCORD_CHANNEL_ID", "0") or "0"))
+NEWS_BOT_TOKEN = str(cfg("NEWS_BOT_TOKEN", "") or "").strip()
+NEWS_CHANNEL_ID = int(str(cfg("NEWS_CHANNEL_ID", "0") or "0"))
 POLL_MINUTES = int(str(cfg("POLL_MINUTES", "5") or "5"))
 MAX_POSTS_PER_RUN = int(str(cfg("MAX_POSTS_PER_RUN", "50") or "50"))
 ESPN_URL = str(cfg("ESPN_URL", "https://fantasy.espn.com/baseball/playernews") or "").strip()
@@ -1463,7 +1463,7 @@ class ESPNNewsBot(commands.Bot):
 
     async def on_ready(self) -> None:
         log(f"Logged in as {self.user}")
-        log(f"Target channel id: {DISCORD_CHANNEL_ID}")
+        log(f"Target channel id: {NEWS_CHANNEL_ID}")
         log("Poll loop started")
 
     def build_embed(self, item: NewsItem) -> discord.Embed:
@@ -1511,9 +1511,9 @@ class ESPNNewsBot(commands.Bot):
         await self.wait_until_ready()
 
     async def run_poll_cycle(self, trigger: str = "manual") -> None:
-        channel = self.get_channel(DISCORD_CHANNEL_ID)
+        channel = self.get_channel(NEWS_CHANNEL_ID)
         if channel is None:
-            log(f"Channel not found: {DISCORD_CHANNEL_ID}")
+            log(f"Channel not found: {NEWS_CHANNEL_ID}")
             return
 
         log(f"Starting poll cycle | trigger={trigger}")
@@ -1572,16 +1572,16 @@ class ESPNNewsBot(commands.Bot):
 
 
 def validate_config() -> None:
-    if not DISCORD_TOKEN:
-        raise RuntimeError("Missing DISCORD_TOKEN environment variable or news_config.DISCORD_TOKEN")
-    if not DISCORD_CHANNEL_ID:
-        raise RuntimeError("Missing DISCORD_CHANNEL_ID environment variable or news_config.DISCORD_CHANNEL_ID")
+    if not NEWS_BOT_TOKEN:
+        raise RuntimeError("Missing NEWS_BOT_TOKEN environment variable or news_config.NEWS_BOT_TOKEN")
+    if not NEWS_CHANNEL_ID:
+        raise RuntimeError("Missing NEWS_CHANNEL_ID environment variable or news_config.NEWS_CHANNEL_ID")
 
 
 def main() -> None:
     validate_config()
     bot = ESPNNewsBot()
-    bot.run(DISCORD_TOKEN)
+    bot.run(NEWS_BOT_TOKEN)
 
 
 if __name__ == "__main__":

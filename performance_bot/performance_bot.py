@@ -29,8 +29,8 @@ if ENV_FILE.exists():
 else:
     load_dotenv()
 
-TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
-OUTPUT_CHANNEL_ID = int(os.getenv("OUTPUT_CHANNEL_ID", "0") or "0")
+TOKEN = os.getenv("NEWS_BOT_TOKEN", "").strip()
+NEWS_CHANNEL_ID = int(os.getenv("NEWS_CHANNEL_ID", "0") or "0")
 
 MLB_STATS_API_BASE = os.getenv("MLB_STATS_API_BASE", "https://statsapi.mlb.com/api/v1").rstrip("/")
 PERFORMANCE_POLL_MINUTES = int(os.getenv("PERFORMANCE_POLL_MINUTES", "10"))
@@ -1150,9 +1150,9 @@ def build_starter_embed(player: Dict[str, Any], line: Dict[str, Any], context: D
 
 
 async def send_output_embed(embed: discord.Embed) -> bool:
-    channel = client.get_channel(OUTPUT_CHANNEL_ID)
+    channel = client.get_channel(NEWS_CHANNEL_ID)
     if not channel:
-        print(f"[ERROR] Output channel not found or no access: {OUTPUT_CHANNEL_ID}")
+        print(f"[ERROR] Output channel not found or no access: {NEWS_CHANNEL_ID}")
         return False
     try:
         await channel.send(embed=embed)
@@ -1284,7 +1284,7 @@ async def performance_scan_loop() -> None:
 @client.event
 async def on_ready() -> None:
     print(f"[PERFORMANCE BOT] Logged in as {client.user}")
-    print(f"[PERFORMANCE BOT] Output channel = {OUTPUT_CHANNEL_ID}")
+    print(f"[PERFORMANCE BOT] Output channel = {NEWS_CHANNEL_ID}")
     print(f"[PERFORMANCE BOT] Posted performance ids loaded = {len(posted_performance_ids)}")
     print(f"[PERFORMANCE BOT] State file = {POSTED_PERFORMANCE_IDS_FILE}")
     print(f"[PERFORMANCE BOT] ENV file = {ENV_FILE}")
@@ -1302,9 +1302,9 @@ async def on_ready() -> None:
 
 async def main() -> None:
     if not TOKEN:
-        raise RuntimeError("DISCORD_TOKEN is missing")
-    if not OUTPUT_CHANNEL_ID:
-        raise RuntimeError("OUTPUT_CHANNEL_ID is missing")
+        raise RuntimeError("NEWS_BOT_TOKEN is missing")
+    if not NEWS_CHANNEL_ID:
+        raise RuntimeError("NEWS_CHANNEL_ID is missing")
     load_state()
     load_top_300_players()
     load_espn_player_ids()
