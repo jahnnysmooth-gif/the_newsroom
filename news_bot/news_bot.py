@@ -16,10 +16,9 @@ try:
 except Exception:
     load_dotenv = None
 
-try:
-    from playwright.async_api import async_playwright
-except Exception:
-    async_playwright = None
+import asyncio
+import requests
+from bs4 import BeautifulSoup
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,7 +44,6 @@ NEWS_CHANNEL_ID = int(str(cfg("NEWS_CHANNEL_ID", "0") or "0"))
 POLL_MINUTES = int(str(cfg("POLL_MINUTES", "5") or "5"))
 MAX_POSTS_PER_RUN = int(str(cfg("MAX_POSTS_PER_RUN", "50") or "50"))
 ESPN_URL = str(cfg("ESPN_URL", "https://fantasy.espn.com/baseball/playernews") or "").strip()
-HEADLESS = str(cfg("HEADLESS", "true") or "true").lower() not in {"0", "false", "no"}
 RESET_STATE_ON_START = str(cfg("RESET_STATE_ON_START", "false") or "false").lower() in {"1", "true", "yes"}
 
 STATE_DIR = BASE_DIR / "state" / "espn_news"
@@ -1332,59 +1330,81 @@ class ESPNSource:
             team_hint=team_hint,
         )
 
+
+    def _extract_row_candidates_from_html(self, html: str) -> List[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        nodes = soup.select("article, section, li, div, tr")
+        out: List[str] = []
+        seen: Set[str] = set()
+
+        for el in nodes:
+            text = clean_spaces(el.get_text(" ", strip=True))
+            if not text:
+                continue
+            if len(text) < 80 or len(text) > 4000:
+                continue
+            if "News Archive" not in text:
+                continue
+            if looks_like_nav_or_shell(text):
+                continue
+            if text in seen:
+                continue
+            seen.add(text)
+            out.append(text)
+
+        if out:
+            return out
+
+        # Fallback: scan the full document text for flattened row blocks.
+        doc_text = clean_spaces(soup.get_text(" ", strip=True))
+        if not doc_text:
+            return []
+
+        pattern = re.compile(
+            r"([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,2}.*?News Archive.*?(?=(?:[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,2}.*?News Archive)|$))"
+        )
+        for m in pattern.finditer(doc_text):
+            candidate = clean_spaces(m.group(1))
+            if 80 <= len(candidate) <= 4000 and candidate not in seen and not looks_like_nav_or_shell(candidate):
+                seen.add(candidate)
+                out.append(candidate)
+        return out
+
     async def fetch_items(self) -> List[NewsItem]:
-        if async_playwright is None:
-            raise RuntimeError("Playwright is not installed. Run: python3 -m pip install playwright && python3 -m playwright install")
+        log(f"Fetching {ESPN_URL} via HTTP")
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
 
-        log(f"Opening {ESPN_URL}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=HEADLESS)
-            context = await browser.new_context(user_agent=USER_AGENT, viewport={"width": 1440, "height": 2600})
-            page = await context.new_page()
-            await page.goto(ESPN_URL, wait_until="domcontentloaded", timeout=60000)
+        def _get_html() -> str:
+            resp = requests.get(ESPN_URL, headers=headers, timeout=30)
+            resp.raise_for_status()
+            return resp.text
 
-            for _ in range(6):
-                await page.wait_for_timeout(1500)
-                await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(2500)
-
-            row_candidates = await page.evaluate(
-                """
-                () => {
-                  const nodes = Array.from(document.querySelectorAll("article, section, li, div, tr"));
-                  const out = [];
-                  for (const el of nodes) {
-                    const text = (el.innerText || "").replace(/\\s+/g, " ").trim();
-                    if (!text) continue;
-                    if (text.length < 80 || text.length > 4000) continue;
-                    if (!text.includes("News Archive")) continue;
-                    out.push(text);
-                  }
-                  return out;
-                }
-                """
-            )
-
-            await context.close()
-            await browser.close()
+        html = await asyncio.to_thread(_get_html)
+        row_candidates = self._extract_row_candidates_from_html(html)
 
         unique_rows: List[str] = []
         seen: Set[str] = set()
-        for text in row_candidates:
-            text = clean_spaces(text)
-            if text and text not in seen and not looks_like_nav_or_shell(text):
-                seen.add(text)
-                unique_rows.append(text)
+        for raw in row_candidates:
+            candidate = clean_spaces(raw)
+            if candidate and candidate not in seen and not looks_like_nav_or_shell(candidate):
+                seen.add(candidate)
+                unique_rows.append(candidate)
 
         debug_lines = ["ROW CANDIDATES", "=" * 60]
-        for i, text in enumerate(unique_rows[:300], start=1):
-            debug_lines.append(f"[{i}] {text}")
+        for i, row_text in enumerate(unique_rows[:300], start=1):
+            debug_lines.append(f"[{i}] {row_text}")
             debug_lines.append("")
         write_text_file(SCRAPE_DEBUG_FILE, "\n".join(debug_lines))
 
         items: List[NewsItem] = []
-        for text in unique_rows:
-            item = self._parse_row_text(text)
+        for row_text in unique_rows:
+            item = self._parse_row_text(row_text)
             if item:
                 items.append(item)
 
@@ -1399,6 +1419,7 @@ class ESPNSource:
 
         log(f"Row candidates={len(unique_rows)} | parsed_items={len(deduped)}")
         return deduped[:100]
+
 
 
 class BotState:
@@ -1449,7 +1470,6 @@ class BotState:
 class ESPNNewsBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
-        intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
 
         self.state = BotState()
@@ -1511,9 +1531,9 @@ class ESPNNewsBot(commands.Bot):
         await self.wait_until_ready()
 
     async def run_poll_cycle(self, trigger: str = "manual") -> None:
-        channel = self.get_channel(NEWS_CHANNEL_ID)
+        channel = self.get_channel(DISCORD_CHANNEL_ID)
         if channel is None:
-            log(f"Channel not found: {NEWS_CHANNEL_ID}")
+            log(f"Channel not found: {DISCORD_CHANNEL_ID}")
             return
 
         log(f"Starting poll cycle | trigger={trigger}")
