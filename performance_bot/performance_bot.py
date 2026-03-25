@@ -29,7 +29,7 @@ if ENV_FILE.exists():
 else:
     load_dotenv()
 
-TOKEN = os.getenv("NEWS_BOT_TOKEN", "").strip()
+NEWS_BOT_TOKEN = os.getenv("NEWS_BOT_TOKEN", "").strip()
 NEWS_CHANNEL_ID = int(os.getenv("NEWS_CHANNEL_ID", "0") or "0")
 
 MLB_STATS_API_BASE = os.getenv("MLB_STATS_API_BASE", "https://statsapi.mlb.com/api/v1").rstrip("/")
@@ -1301,7 +1301,7 @@ async def on_ready() -> None:
 
 
 async def main() -> None:
-    if not TOKEN:
+    if not NEWS_BOT_TOKEN:
         raise RuntimeError("NEWS_BOT_TOKEN is missing")
     if not NEWS_CHANNEL_ID:
         raise RuntimeError("NEWS_CHANNEL_ID is missing")
@@ -1310,7 +1310,7 @@ async def main() -> None:
     load_espn_player_ids()
     print("[PERFORMANCE BOT] Starting...")
     await asyncio.sleep(STARTUP_DELAY_SECONDS)
-    await client.start(TOKEN)
+    await client.start(NEWS_BOT_TOKEN)
 
 
 if __name__ == "__main__":
