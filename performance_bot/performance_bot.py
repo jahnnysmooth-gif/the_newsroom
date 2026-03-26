@@ -29,23 +29,41 @@ if ENV_FILE.exists():
 else:
     load_dotenv()
 
-NEWS_BOT_TOKEN = os.getenv("NEWS_BOT_TOKEN", "").strip()
-NEWS_CHANNEL_ID = int(os.getenv("NEWS_CHANNEL_ID", "0") or "0")
+def _env_str(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return default
 
-MLB_STATS_API_BASE = os.getenv("MLB_STATS_API_BASE", "https://statsapi.mlb.com/api/v1").rstrip("/")
-PERFORMANCE_POLL_MINUTES = int(os.getenv("PERFORMANCE_POLL_MINUTES", "10"))
-PERFORMANCE_SCAN_INTERVAL = int(
-    os.getenv("PERFORMANCE_SCAN_INTERVAL", str(PERFORMANCE_POLL_MINUTES * 60))
-)
-PERFORMANCE_STARTUP_DELAY_SECONDS = int(os.getenv("PERFORMANCE_STARTUP_DELAY_SECONDS", "5"))
-PERFORMANCE_PERFORMANCE_BACKFILL_DAYS = int(os.getenv("PERFORMANCE_PERFORMANCE_BACKFILL_DAYS", "1"))
-PERFORMANCE_ONLY_FINAL = os.getenv("PERFORMANCE_ONLY_FINAL", "true").strip().lower() in {
-    "1", "true", "yes", "y", "on"
-}
-REQUEST_TIMEOUT = float(os.getenv("MLB_STATS_TIMEOUT", "10"))
-PERFORMANCE_DEBUG_SCHEDULE = os.getenv("PERFORMANCE_DEBUG_SCHEDULE", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-PERFORMANCE_DEBUG_RECAP = os.getenv("PERFORMANCE_DEBUG_RECAP", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-PERFORMANCE_BYPASS_POSTED_IDS = os.getenv("PERFORMANCE_BYPASS_POSTED_IDS", "false").lower() == "true"
+
+def _env_int(*names: str, default: int) -> int:
+    raw = _env_str(*names, default=str(default))
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def _env_bool(*names: str, default: bool) -> bool:
+    raw = _env_str(*names, default="true" if default else "false").lower()
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+TOKEN = _env_str("NEWS_BOT_TOKEN", "DISCORD_TOKEN")
+OUTPUT_CHANNEL_ID = _env_int("NEWS_CHANNEL_ID", "OUTPUT_CHANNEL_ID", "DISCORD_CHANNEL_ID", default=0)
+
+MLB_STATS_API_BASE = _env_str("MLB_STATS_API_BASE", default="https://statsapi.mlb.com/api/v1").rstrip("/")
+PERFORMANCE_POLL_MINUTES = _env_int("PERFORMANCE_POLL_MINUTES", default=10)
+PERFORMANCE_SCAN_INTERVAL = _env_int("PERFORMANCE_SCAN_INTERVAL", default=PERFORMANCE_POLL_MINUTES * 60)
+STARTUP_DELAY_SECONDS = _env_int("PERFORMANCE_STARTUP_DELAY_SECONDS", "STARTUP_DELAY_SECONDS", default=5)
+BACKFILL_DAYS = _env_int("PERFORMANCE_BACKFILL_DAYS", "PERFORMANCE_PERFORMANCE_BACKFILL_DAYS", default=1)
+PERFORMANCE_ONLY_FINAL = _env_bool("PERFORMANCE_ONLY_FINAL", default=True)
+REQUEST_TIMEOUT = float(_env_str("MLB_STATS_TIMEOUT", default="10"))
+DEBUG_SCHEDULE = _env_bool("PERFORMANCE_DEBUG_SCHEDULE", "DEBUG_SCHEDULE", default=True)
+DEBUG_RECAP = _env_bool("PERFORMANCE_DEBUG_RECAP", "DEBUG_RECAP", default=True)
+BYPASS_POSTED_IDS = _env_bool("PERFORMANCE_BYPASS_POSTED_IDS", "BYPASS_POSTED_IDS", default=False)
+
 
 STATE_DIR = BASE_DIR / "state" / "performance_bot"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -121,6 +139,10 @@ def _save_json(path: Path, payload: Any) -> None:
 
 def load_state() -> None:
     global posted_performance_ids
+    if BYPASS_POSTED_IDS:
+        posted_performance_ids = set()
+        print("[PERFORMANCE BOT] PERFORMANCE_BYPASS_POSTED_IDS enabled — starting with empty posted ids")
+        return
     posted_performance_ids = {str(x) for x in _load_json(POSTED_PERFORMANCE_IDS_FILE, [])}
 
 
@@ -172,18 +194,40 @@ def load_espn_player_ids() -> None:
         clean_name = (name or "").strip()
         if not clean_name or not isinstance(item, dict):
             return
-        record = {
-            "espn_id": item.get("espn_id"),
-            "headshot_url": str(item.get("headshot_url") or "").strip(),
-            "mlbam_id": item.get("mlbam_id"),
-            "pos": str(item.get("pos") or "").strip(),
-        }
-        mlbam_id = record.get("mlbam_id")
+
+        espn_id = item.get("espn_id")
+        mlbam_id = item.get("mlbam_id")
+        headshot_url = str(item.get("headshot_url") or "").strip()
+        pos = str(item.get("pos") or "").strip()
+        team = str(item.get("team") or "").strip()
+
+        has_player_id = False
         try:
             if mlbam_id is not None and str(mlbam_id).strip() != "":
-                by_mlbam[int(mlbam_id)] = record
+                mlbam_id = int(mlbam_id)
+                has_player_id = True
         except Exception:
-            pass
+            mlbam_id = None
+
+        try:
+            if espn_id is not None and str(espn_id).strip() != "":
+                espn_id = int(espn_id)
+                has_player_id = True
+        except Exception:
+            espn_id = None
+
+        if not headshot_url or not has_player_id:
+            return
+
+        record = {
+            "espn_id": espn_id,
+            "headshot_url": headshot_url,
+            "mlbam_id": mlbam_id,
+            "pos": pos,
+            "team": team,
+        }
+        if mlbam_id is not None and mlbam_id not in by_mlbam:
+            by_mlbam[mlbam_id] = record
         if clean_name not in by_name:
             by_name[clean_name] = record
 
@@ -197,7 +241,6 @@ def load_espn_player_ids() -> None:
 
     espn_players_by_mlbam = by_mlbam
     espn_players_by_name = by_name
-
 
 def get_player_headshot(player_name: str, mlbam_id: Optional[int] = None) -> str:
     try:
@@ -221,13 +264,17 @@ def _today_key(dt: Optional[datetime] = None) -> str:
 
 def _get(url: str, params: Optional[dict] = None) -> Optional[dict]:
     try:
-        resp = SESSION.get(url, params=params or {}, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
+        with SESSION.get(url, params=params or {}, timeout=REQUEST_TIMEOUT) as resp:
+            resp.raise_for_status()
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if "json" in content_type:
+                return resp.json()
+            preview = (resp.text or "")[:500].replace("\n", " ")
+            print(f"[HTTP ERROR] Non-JSON response from {url} | content-type={content_type} | preview={preview}")
+            return None
     except Exception as exc:
         print(f"[HTTP ERROR] {url} | {exc}")
         return None
-
 
 def _schedule_url() -> str:
     return f"{MLB_STATS_API_BASE}/schedule"
@@ -267,7 +314,7 @@ def fetch_game_pks_for_date(target_date: str) -> List[int]:
                 if status in {"Live", "Final"} or detailed in {"In Progress", "Game Over", "Final"}:
                     pks.append(int(game_pk))
 
-    if PERFORMANCE_DEBUG_SCHEDULE:
+    if DEBUG_SCHEDULE:
         print(f"[SCHEDULE DEBUG] date={target_date} PERFORMANCE_ONLY_FINAL={PERFORMANCE_ONLY_FINAL}")
         print(f"[SCHEDULE DEBUG] total_games_returned={len(all_games)}")
         for row in all_games:
@@ -1076,7 +1123,7 @@ def _build_starter_recap(player: Dict[str, Any], line: Dict[str, Any], context: 
 
 
 def _debug_hitter_context(player: Dict[str, Any], line: Dict[str, Any], context: Dict[str, Any], statcast: Dict[str, Any], impact: Dict[str, Any], recent_games: List[Dict[str, Any]]) -> None:
-    if not PERFORMANCE_DEBUG_RECAP:
+    if not DEBUG_RECAP:
         return
     bits = context.get("summary_bits") or {}
     print(f"[RECAP DEBUG][HITTER] {player['name']}")
@@ -1089,7 +1136,7 @@ def _debug_hitter_context(player: Dict[str, Any], line: Dict[str, Any], context:
 
 
 def _debug_starter_context(player: Dict[str, Any], line: Dict[str, Any], context: Dict[str, Any], velo: Dict[str, Any], impact: Dict[str, Any], previous_starts: List[Dict[str, Any]]) -> None:
-    if not PERFORMANCE_DEBUG_RECAP:
+    if not DEBUG_RECAP:
         return
     bits = context.get("summary_bits") or {}
     print(f"[RECAP DEBUG][STARTER] {player['name']}")
@@ -1149,11 +1196,80 @@ def build_starter_embed(player: Dict[str, Any], line: Dict[str, Any], context: D
     return embed
 
 
+def _safe_hitter_statcast_context(player_id: int, game_date: str, game_pk: int) -> Dict[str, Any]:
+    try:
+        payload = fetch_hitter_statcast_context(player_id, game_date, game_pk)
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        print(f"[PERF STATCAST ERROR] hitter={player_id} gamePk={game_pk} | {exc}")
+        return {}
+
+
+def _safe_starter_velocity_context(player_id: int, game_date: str, starts_back: int, game_pk: int) -> Dict[str, Any]:
+    try:
+        payload = fetch_starter_velocity_context(player_id, game_date, starts_back, game_pk)
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        print(f"[PERF STATCAST ERROR] starter={player_id} gamePk={game_pk} | {exc}")
+        return {}
+
+
+def _safe_hitter_context(
+    player: Dict[str, Any],
+    line: Dict[str, Any],
+    statcast: Dict[str, Any],
+    recent_games: List[Dict[str, Any]],
+    impact: Dict[str, Any],
+    top_rank: Optional[int],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    try:
+        payload = get_hitter_performance_context(
+            player,
+            line,
+            statcast=statcast,
+            recent_games=recent_games,
+            game_impact=impact,
+            top_rank=top_rank,
+            decision=decision,
+        )
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        print(f"[PERF CONTEXT ERROR] hitter={player.get('name')} | {exc}")
+        return {}
+
+
+def _safe_starter_context(
+    player: Dict[str, Any],
+    line: Dict[str, Any],
+    velocity_data: Dict[str, Any],
+    previous_starts: List[Dict[str, Any]],
+    impact: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    try:
+        payload = get_starter_performance_context(
+            player,
+            line,
+            velocity_data=velocity_data,
+            previous_starts=previous_starts,
+            game_impact=impact,
+            decision=decision,
+        )
+        return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        print(f"[PERF CONTEXT ERROR] starter={player.get('name')} | {exc}")
+        return {}
+
+
 async def send_output_embed(embed: discord.Embed) -> bool:
-    channel = client.get_channel(NEWS_CHANNEL_ID)
-    if not channel:
-        print(f"[ERROR] Output channel not found or no access: {NEWS_CHANNEL_ID}")
-        return False
+    channel = client.get_channel(OUTPUT_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(OUTPUT_CHANNEL_ID)
+        except Exception as exc:
+            print(f"[ERROR] Output channel not found or no access: {OUTPUT_CHANNEL_ID} | {exc}")
+            return False
     try:
         await channel.send(embed=embed)
     except Exception as exc:
@@ -1187,10 +1303,10 @@ async def process_game_performances(game_pk: int) -> None:
         if not decision.get("post"):
             continue
 
-        statcast = await asyncio.to_thread(fetch_hitter_statcast_context, player_id, game_date, game_pk)
+        statcast = await asyncio.to_thread(_safe_hitter_statcast_context, player_id, game_date, game_pk)
         impact = get_hitter_game_impact(feed, player_id, player["name"], line.get("team_side") or "away")
         player["top_rank"] = top_rank
-        context = get_hitter_performance_context(
+        context = _safe_hitter_context(
             player,
             line,
             statcast=statcast,
@@ -1221,7 +1337,7 @@ async def process_game_performances(game_pk: int) -> None:
 
         previous_starts = await asyncio.to_thread(_recent_pitching_starts, player_id, season, 3)
 
-        velo = await asyncio.to_thread(fetch_starter_velocity_context, player_id, game_date, 3, game_pk)
+        velo = await asyncio.to_thread(_safe_starter_velocity_context, player_id, game_date, 3, game_pk)
         impact = get_starter_game_impact(feed, player_id)
         statcast_previous = []
         if isinstance(velo, dict):
@@ -1237,7 +1353,7 @@ async def process_game_performances(game_pk: int) -> None:
                     merged["fastball_max"] = statcast_previous[idx].get("fastball_max")
             merged_previous_starts.append(merged)
 
-        context = get_starter_performance_context(
+        context = _safe_starter_context(
             player,
             line,
             velocity_data=velo,
@@ -1256,11 +1372,11 @@ async def process_game_performances(game_pk: int) -> None:
 
 
 async def run_startup_backfill() -> None:
-    if PERFORMANCE_BACKFILL_DAYS <= 0:
+    if BACKFILL_DAYS <= 0:
         return
     try:
-        backfill_game_pks = await asyncio.to_thread(fetch_startup_backfill_game_pks, PERFORMANCE_BACKFILL_DAYS)
-        print(f"[PERF BACKFILL] days={PERFORMANCE_BACKFILL_DAYS} games={len(backfill_game_pks)}")
+        backfill_game_pks = await asyncio.to_thread(fetch_startup_backfill_game_pks, BACKFILL_DAYS)
+        print(f"[PERF BACKFILL] days={BACKFILL_DAYS} games={len(backfill_game_pks)}")
         for game_pk in backfill_game_pks:
             await process_game_performances(game_pk)
     except Exception as exc:
@@ -1284,15 +1400,15 @@ async def performance_scan_loop() -> None:
 @client.event
 async def on_ready() -> None:
     print(f"[PERFORMANCE BOT] Logged in as {client.user}")
-    print(f"[PERFORMANCE BOT] Output channel = {NEWS_CHANNEL_ID}")
+    print(f"[PERFORMANCE BOT] Output channel = {OUTPUT_CHANNEL_ID}")
     print(f"[PERFORMANCE BOT] Posted performance ids loaded = {len(posted_performance_ids)}")
     print(f"[PERFORMANCE BOT] State file = {POSTED_PERFORMANCE_IDS_FILE}")
     print(f"[PERFORMANCE BOT] ENV file = {ENV_FILE}")
     print(f"[PERFORMANCE BOT] PERFORMANCE_ONLY_FINAL = {PERFORMANCE_ONLY_FINAL}")
     print(f"[PERFORMANCE BOT] PERFORMANCE_SCAN_INTERVAL = {PERFORMANCE_SCAN_INTERVAL}")
-    print(f"[PERFORMANCE BOT] PERFORMANCE_PERFORMANCE_BACKFILL_DAYS = {PERFORMANCE_BACKFILL_DAYS}")
-    print(f"[PERFORMANCE BOT] PERFORMANCE_DEBUG_SCHEDULE = {PERFORMANCE_DEBUG_SCHEDULE}")
-    print(f"[PERFORMANCE BOT] PERFORMANCE_DEBUG_RECAP = {PERFORMANCE_DEBUG_RECAP}")
+    print(f"[PERFORMANCE BOT] PERFORMANCE_BACKFILL_DAYS = {BACKFILL_DAYS}")
+    print(f"[PERFORMANCE BOT] DEBUG_SCHEDULE = {DEBUG_SCHEDULE}")
+    print(f"[PERFORMANCE BOT] DEBUG_RECAP = {DEBUG_RECAP}")
     print(f"[PERFORMANCE BOT] Top 300 file = {TOP_300_PLAYERS_FILE}")
     print(f"[PERFORMANCE BOT] Top 300 players loaded = {len(top_300_players)}")
     print(f"[PERFORMANCE BOT] ESPN player ids file = {_espn_file_path()}")
@@ -1301,16 +1417,22 @@ async def on_ready() -> None:
 
 
 async def main() -> None:
-    if not NEWS_BOT_TOKEN:
-        raise RuntimeError("NEWS_BOT_TOKEN is missing")
-    if not NEWS_CHANNEL_ID:
-        raise RuntimeError("NEWS_CHANNEL_ID is missing")
+    if not TOKEN:
+        raise RuntimeError("DISCORD_TOKEN is missing")
+    if not OUTPUT_CHANNEL_ID:
+        raise RuntimeError("OUTPUT_CHANNEL_ID is missing")
     load_state()
     load_top_300_players()
     load_espn_player_ids()
     print("[PERFORMANCE BOT] Starting...")
-    await asyncio.sleep(PERFORMANCE_STARTUP_DELAY_SECONDS)
-    await client.start(NEWS_BOT_TOKEN)
+    await asyncio.sleep(STARTUP_DELAY_SECONDS)
+    try:
+        await client.start(TOKEN)
+    finally:
+        try:
+            SESSION.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
