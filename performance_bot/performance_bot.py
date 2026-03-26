@@ -37,15 +37,15 @@ PERFORMANCE_POLL_MINUTES = int(os.getenv("PERFORMANCE_POLL_MINUTES", "10"))
 PERFORMANCE_SCAN_INTERVAL = int(
     os.getenv("PERFORMANCE_SCAN_INTERVAL", str(PERFORMANCE_POLL_MINUTES * 60))
 )
-STARTUP_DELAY_SECONDS = int(os.getenv("STARTUP_DELAY_SECONDS", "5"))
-BACKFILL_DAYS = int(os.getenv("PERFORMANCE_BACKFILL_DAYS", "1"))
+PERFORMANCE_STARTUP_DELAY_SECONDS = int(os.getenv("PERFORMANCE_STARTUP_DELAY_SECONDS", "5"))
+PERFORMANCE_PERFORMANCE_BACKFILL_DAYS = int(os.getenv("PERFORMANCE_PERFORMANCE_BACKFILL_DAYS", "1"))
 PERFORMANCE_ONLY_FINAL = os.getenv("PERFORMANCE_ONLY_FINAL", "true").strip().lower() in {
     "1", "true", "yes", "y", "on"
 }
 REQUEST_TIMEOUT = float(os.getenv("MLB_STATS_TIMEOUT", "10"))
-DEBUG_SCHEDULE = os.getenv("DEBUG_SCHEDULE", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-DEBUG_RECAP = os.getenv("DEBUG_RECAP", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
-BYPASS_POSTED_IDS = os.getenv("BYPASS_POSTED_IDS", "false").lower() == "true"
+PERFORMANCE_DEBUG_SCHEDULE = os.getenv("PERFORMANCE_DEBUG_SCHEDULE", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+PERFORMANCE_DEBUG_RECAP = os.getenv("PERFORMANCE_DEBUG_RECAP", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+PERFORMANCE_BYPASS_POSTED_IDS = os.getenv("PERFORMANCE_BYPASS_POSTED_IDS", "false").lower() == "true"
 
 STATE_DIR = BASE_DIR / "state" / "performance_bot"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -267,7 +267,7 @@ def fetch_game_pks_for_date(target_date: str) -> List[int]:
                 if status in {"Live", "Final"} or detailed in {"In Progress", "Game Over", "Final"}:
                     pks.append(int(game_pk))
 
-    if DEBUG_SCHEDULE:
+    if PERFORMANCE_DEBUG_SCHEDULE:
         print(f"[SCHEDULE DEBUG] date={target_date} PERFORMANCE_ONLY_FINAL={PERFORMANCE_ONLY_FINAL}")
         print(f"[SCHEDULE DEBUG] total_games_returned={len(all_games)}")
         for row in all_games:
@@ -1076,7 +1076,7 @@ def _build_starter_recap(player: Dict[str, Any], line: Dict[str, Any], context: 
 
 
 def _debug_hitter_context(player: Dict[str, Any], line: Dict[str, Any], context: Dict[str, Any], statcast: Dict[str, Any], impact: Dict[str, Any], recent_games: List[Dict[str, Any]]) -> None:
-    if not DEBUG_RECAP:
+    if not PERFORMANCE_DEBUG_RECAP:
         return
     bits = context.get("summary_bits") or {}
     print(f"[RECAP DEBUG][HITTER] {player['name']}")
@@ -1089,7 +1089,7 @@ def _debug_hitter_context(player: Dict[str, Any], line: Dict[str, Any], context:
 
 
 def _debug_starter_context(player: Dict[str, Any], line: Dict[str, Any], context: Dict[str, Any], velo: Dict[str, Any], impact: Dict[str, Any], previous_starts: List[Dict[str, Any]]) -> None:
-    if not DEBUG_RECAP:
+    if not PERFORMANCE_DEBUG_RECAP:
         return
     bits = context.get("summary_bits") or {}
     print(f"[RECAP DEBUG][STARTER] {player['name']}")
@@ -1256,11 +1256,11 @@ async def process_game_performances(game_pk: int) -> None:
 
 
 async def run_startup_backfill() -> None:
-    if BACKFILL_DAYS <= 0:
+    if PERFORMANCE_BACKFILL_DAYS <= 0:
         return
     try:
-        backfill_game_pks = await asyncio.to_thread(fetch_startup_backfill_game_pks, BACKFILL_DAYS)
-        print(f"[PERF BACKFILL] days={BACKFILL_DAYS} games={len(backfill_game_pks)}")
+        backfill_game_pks = await asyncio.to_thread(fetch_startup_backfill_game_pks, PERFORMANCE_BACKFILL_DAYS)
+        print(f"[PERF BACKFILL] days={PERFORMANCE_BACKFILL_DAYS} games={len(backfill_game_pks)}")
         for game_pk in backfill_game_pks:
             await process_game_performances(game_pk)
     except Exception as exc:
@@ -1290,9 +1290,9 @@ async def on_ready() -> None:
     print(f"[PERFORMANCE BOT] ENV file = {ENV_FILE}")
     print(f"[PERFORMANCE BOT] PERFORMANCE_ONLY_FINAL = {PERFORMANCE_ONLY_FINAL}")
     print(f"[PERFORMANCE BOT] PERFORMANCE_SCAN_INTERVAL = {PERFORMANCE_SCAN_INTERVAL}")
-    print(f"[PERFORMANCE BOT] PERFORMANCE_BACKFILL_DAYS = {BACKFILL_DAYS}")
-    print(f"[PERFORMANCE BOT] DEBUG_SCHEDULE = {DEBUG_SCHEDULE}")
-    print(f"[PERFORMANCE BOT] DEBUG_RECAP = {DEBUG_RECAP}")
+    print(f"[PERFORMANCE BOT] PERFORMANCE_PERFORMANCE_BACKFILL_DAYS = {PERFORMANCE_BACKFILL_DAYS}")
+    print(f"[PERFORMANCE BOT] PERFORMANCE_DEBUG_SCHEDULE = {PERFORMANCE_DEBUG_SCHEDULE}")
+    print(f"[PERFORMANCE BOT] PERFORMANCE_DEBUG_RECAP = {PERFORMANCE_DEBUG_RECAP}")
     print(f"[PERFORMANCE BOT] Top 300 file = {TOP_300_PLAYERS_FILE}")
     print(f"[PERFORMANCE BOT] Top 300 players loaded = {len(top_300_players)}")
     print(f"[PERFORMANCE BOT] ESPN player ids file = {_espn_file_path()}")
@@ -1309,7 +1309,7 @@ async def main() -> None:
     load_top_300_players()
     load_espn_player_ids()
     print("[PERFORMANCE BOT] Starting...")
-    await asyncio.sleep(STARTUP_DELAY_SECONDS)
+    await asyncio.sleep(PERFORMANCE_STARTUP_DELAY_SECONDS)
     await client.start(NEWS_BOT_TOKEN)
 
 

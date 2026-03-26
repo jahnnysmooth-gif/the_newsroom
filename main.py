@@ -21,6 +21,9 @@ async def run_script_forever(name: str, script_path: Path) -> None:
     if not script_path.exists():
         raise FileNotFoundError(f"{name} script not found: {script_path}")
 
+    restart_delay = 30
+    max_restart_delay = 300
+
     while True:
         print(f"[MAIN] Starting {name}: {script_path}", flush=True)
 
@@ -33,14 +36,26 @@ async def run_script_forever(name: str, script_path: Path) -> None:
             env=os.environ.copy(),
         )
 
+        started_at = asyncio.get_running_loop().time()
+
         assert proc.stdout is not None
         output_task = asyncio.create_task(stream_output(name, proc.stdout))
 
         return_code = await proc.wait()
         await output_task
 
-        print(f"[MAIN] {name} exited with code {return_code}. Restarting in 10 seconds...", flush=True)
-        await asyncio.sleep(10)
+        runtime_seconds = int(asyncio.get_running_loop().time() - started_at)
+        if runtime_seconds >= 300:
+            restart_delay = 30
+        else:
+            restart_delay = min(restart_delay * 2, max_restart_delay)
+
+        print(
+            f"[MAIN] {name} exited with code {return_code} after {runtime_seconds}s. "
+            f"Restarting in {restart_delay} seconds...",
+            flush=True,
+        )
+        await asyncio.sleep(restart_delay)
 
 
 async def main() -> None:

@@ -41,10 +41,10 @@ def cfg(name: str, default: Any = None) -> Any:
 
 NEWS_BOT_TOKEN = str(cfg("NEWS_BOT_TOKEN", "") or "").strip()
 NEWS_CHANNEL_ID = int(str(cfg("NEWS_CHANNEL_ID", "0") or "0"))
-POLL_MINUTES = int(str(cfg("POLL_MINUTES", "5") or "5"))
-MAX_POSTS_PER_RUN = int(str(cfg("MAX_POSTS_PER_RUN", "50") or "50"))
-ESPN_URL = str(cfg("ESPN_URL", "https://fantasy.espn.com/baseball/playernews") or "").strip()
-RESET_STATE_ON_START = str(cfg("RESET_STATE_ON_START", "false") or "false").lower() in {"1", "true", "yes"}
+NEWS_POLL_MINUTES = int(str(cfg("NEWS_POLL_MINUTES", "5") or "5"))
+NEWS_MAX_POSTS_PER_RUN = int(str(cfg("NEWS_MAX_POSTS_PER_RUN", "50") or "50"))
+NEWS_ESPN_URL = str(cfg("NEWS_ESPN_URL", "https://fantasy.espn.com/baseball/playernews") or "").strip()
+NEWS_RESET_STATE_ON_START = str(cfg("NEWS_RESET_STATE_ON_START", "false") or "false").lower() in {"1", "true", "yes"}
 
 STATE_DIR = BASE_DIR / "state" / "espn_news"
 POSTED_IDS_FILE = STATE_DIR / "posted_ids.json"
@@ -1371,7 +1371,7 @@ class ESPNSource:
         return out
 
     async def fetch_items(self) -> List[NewsItem]:
-        log(f"Fetching {ESPN_URL} via HTTP")
+        log(f"Fetching {NEWS_ESPN_URL} via HTTP")
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -1381,7 +1381,7 @@ class ESPNSource:
         }
 
         def _get_html() -> str:
-            resp = requests.get(ESPN_URL, headers=headers, timeout=30)
+            resp = requests.get(NEWS_ESPN_URL, headers=headers, timeout=30)
             resp.raise_for_status()
             return resp.text
 
@@ -1425,7 +1425,7 @@ class ESPNSource:
 class BotState:
     def __init__(self) -> None:
         ensure_state_dir()
-        if RESET_STATE_ON_START:
+        if NEWS_RESET_STATE_ON_START:
             self.reset()
         self.posted_ids: List[str] = load_json_file(POSTED_IDS_FILE, [])
         self.recent_hashes: Dict[str, str] = load_json_file(RECENT_HASHES_FILE, {})
@@ -1435,7 +1435,7 @@ class BotState:
         save_json_file(POSTED_IDS_FILE, [])
         save_json_file(RECENT_HASHES_FILE, {})
         save_json_file(PLAYER_LAST_POSTS_FILE, {})
-        log("RESET_STATE_ON_START enabled — cleared ESPN state")
+        log("NEWS_RESET_STATE_ON_START enabled — cleared ESPN state")
 
     def save(self) -> None:
         save_json_file(POSTED_IDS_FILE, self.posted_ids[-5000:])
@@ -1522,7 +1522,7 @@ class ESPNNewsBot(commands.Bot):
     async def post_item(self, channel: discord.abc.Messageable, item: NewsItem) -> None:
         await channel.send(embed=self.build_embed(item))
 
-    @tasks.loop(minutes=POLL_MINUTES)
+    @tasks.loop(minutes=NEWS_POLL_MINUTES)
     async def poll_loop(self) -> None:
         await self.run_poll_cycle("loop")
 
@@ -1531,9 +1531,9 @@ class ESPNNewsBot(commands.Bot):
         await self.wait_until_ready()
 
     async def run_poll_cycle(self, trigger: str = "manual") -> None:
-        channel = self.get_channel(DISCORD_CHANNEL_ID)
+        channel = self.get_channel(NEWS_CHANNEL_ID)
         if channel is None:
-            log(f"Channel not found: {DISCORD_CHANNEL_ID}")
+            log(f"Channel not found: {NEWS_CHANNEL_ID}")
             return
 
         log(f"Starting poll cycle | trigger={trigger}")
@@ -1551,8 +1551,8 @@ class ESPNNewsBot(commands.Bot):
         posted = 0
 
         for item in items:
-            if posted >= MAX_POSTS_PER_RUN:
-                log(f"Reached MAX_POSTS_PER_RUN={MAX_POSTS_PER_RUN}")
+            if posted >= NEWS_MAX_POSTS_PER_RUN:
+                log(f"Reached NEWS_MAX_POSTS_PER_RUN={NEWS_MAX_POSTS_PER_RUN}")
                 break
 
             if is_suspicious_row_mismatch(item.player_name, item.team_hint, item.update_text):
